@@ -51,16 +51,16 @@ class TC_AVSUM_2_1(MatterBaseTest, AVSUMTestBase):
     def steps_TC_AVSUM_2_1(self) -> list[TestStep]:
         steps = [
             TestStep(1, "Commissioning, already done", is_commissioning=True),
-            TestStep(2, "Read and verify that one of MTILT, MPAN, or MZOOM is supported"),
+            TestStep(2, "Read and verify that one of MTILT, MPAN, MZOOM, or DPTZ is supported"),
             TestStep(3, "Read and verify ZoomMax attribute, if supported"),
             TestStep(4, "Read and verify TiltMin attribute, if supported"),
             TestStep(5, "Read and verify TiltMax attribute, if supported"),
             TestStep(6, "Read and verify PanMin attribute, if supported"),
             TestStep(7, "Read and verify PanMax attribute, if supported"),
-            TestStep(8, "Read and verify MPTZPosition attribute."),
+            TestStep(8, "Read and verify MPTZPosition attribute, if supported."),
             TestStep(9, "Read and verify MaxPresets attribute, if supported."),
             TestStep(10, "Read and verify MPTZPresets attribute, if supported."),
-            TestStep(11, "Read and verify DPTZRelativeMove attribute, if supported"),
+            TestStep(11, "Read and verify DPTZStreams attribute, if supported"),
         ]
         return steps
 
@@ -88,13 +88,13 @@ class TC_AVSUM_2_1(MatterBaseTest, AVSUMTestBase):
         self.has_feature_mpresets = (feature_map & cluster.Bitmaps.Feature.kMechanicalPresets) != 0
 
         logging.info(
-            f"Feature map: 0x{feature_map:x}. MPAN: {self.has_feature_mpan}, MTILT:{self.has_feature_mtilt}, MZOOM:{self.has_feature_mzoom}")
+            f"Feature map: 0x{feature_map:x}. MPAN: {self.has_feature_mpan}, MTILT:{self.has_feature_mtilt}, MZOOM:{self.has_feature_mzoom}, DPTZ:{self.has_feature_dptz}")
 
         attribute_list = await self.read_avsum_attribute_expect_success(endpoint, attributes.AttributeList)
 
         self.step(2)
-        if not (self.has_feature_mpan | self.has_feature_mtilt | self.has_feature_mzoom):
-            asserts.fail("One of MPAN, MTILT, or MZOOM is mandatory")
+        if not (self.has_feature_mpan | self.has_feature_mtilt | self.has_feature_mzoom | self.has_feature_dptz):
+            asserts.fail("One of MPAN, MTILT, MZOOM, or DPTZ is mandatory")
 
         if self.has_feature_mzoom:
             self.step(3)
@@ -145,12 +145,14 @@ class TC_AVSUM_2_1(MatterBaseTest, AVSUMTestBase):
             self.skip_step(6)
             self.skip_step(7)
 
-        # We have already exited the testcase if one of MPAN, MTILT, or MZOOM is not present.  MPTZPosition is effectively
-        # mandatory
-        self.step(8)
-        asserts.assert_in(attributes.MPTZPosition.attribute_id, attribute_list, "MPTZPosition attribute is mandatory.")
-        mptzposition_dut = await self.read_avsum_attribute_expect_success(endpoint, attributes.MPTZPosition)
-        self.ptz_range_validation(mptzposition_dut, tilt_min_dut, tilt_max_dut, pan_min_dut, pan_max_dut, zoom_max_dut)
+        if self.has_feature_mpan | self.has_feature_mtilt | self.has_feature_mzoom:
+            self.step(8)
+            asserts.assert_in(attributes.MPTZPosition.attribute_id, attribute_list,
+                              "MPTZPosition attribute is mandatory if one of MPAN, MTILT, or MZOOM.")
+            mptzposition_dut = await self.read_avsum_attribute_expect_success(endpoint, attributes.MPTZPosition)
+            self.ptz_range_validation(mptzposition_dut, tilt_min_dut, tilt_max_dut, pan_min_dut, pan_max_dut, zoom_max_dut)
+        else:
+            self.skip_step(8)
 
         if self.has_feature_mpresets:
             self.step(9)
@@ -158,7 +160,7 @@ class TC_AVSUM_2_1(MatterBaseTest, AVSUMTestBase):
                               "MaxPresets attribute is a mandatory attribute if MPRESETS.")
 
             # For now force a preset to be present so there is something to read
-            await self.send_save_presets_command(endpoint, name="newpreset")
+            await self.send_save_preset_command(endpoint, name="newpreset")
 
             max_presets_dut = await self.read_avsum_attribute_expect_success(endpoint, attributes.MaxPresets)
 
@@ -184,16 +186,16 @@ class TC_AVSUM_2_1(MatterBaseTest, AVSUMTestBase):
 
         if self.has_feature_dptz:
             self.step(11)
-            asserts.assert_in(attributes.DPTZRelativeMove.attribute_id, attribute_list,
-                              "DPTZRelativeMove attribute is a mandatory attribute if DPTZ.")
+            asserts.assert_in(attributes.DPTZStreams.attribute_id, attribute_list,
+                              "DPTZStreams attribute is a mandatory attribute if DPTZ.")
 
-            dptz_relative_move_dut = await self.read_avsum_attribute_expect_success(endpoint, attributes.DPTZRelativeMove)
-            if dptz_relative_move_dut is not None:
+            dptz_streams_dut = await self.read_avsum_attribute_expect_success(endpoint, attributes.DPTZStreams)
+            if dptz_streams_dut is not None:
                 # Verify that all elements in the list are unique
-                asserts.assert_equal(len(dptz_relative_move_dut), len(
-                    set(dptz_relative_move_dut)), "DPTZRelativeMove has non-unique values")
-                for videostreamid in dptz_relative_move_dut:
-                    asserts.assert_greater_equal(videostreamid, 0, "Provided video stream id is out of range")
+                asserts.assert_equal(len(dptz_streams_dut), len(
+                    set(dptz_streams_dut)), "DPTZStreams has non-unique values")
+                for streams in dptz_streams_dut:
+                    asserts.assert_greater_equal(streams.videostreamid, 0, "Provided video stream id is out of range")
         else:
             logging.info("DPTZ Feature not supported. Test step skipped")
             self.skip_step(11)
